@@ -112,6 +112,13 @@ class ToxidCurl
             && ($sCacheContent = $oUtils->fromFileCache($sCacheIdent))
             && $oUtilsServer->getServerVar('HTTP_CACHE_CONTROL') !== 'no-cache'
         ) {
+            // Restore metadata from cache
+            if (is_array($sCacheContent)) {
+                $this->_sPageTitle = $sCacheContent['title'] ?? null;
+                $this->_sPageDescription = $sCacheContent['description'] ?? null;
+                $this->_sPageKeywords = $sCacheContent['keywords'] ?? null;
+                return $sCacheContent['content'] ?? '';
+            }
             return $sCacheContent;
         }
 
@@ -141,9 +148,14 @@ class ToxidCurl
             }
         }
 
-        // save in cache if ttl is set
+        // save in cache if ttl is set (including metadata for title/description/keywords)
         if ($iCacheTtl !== null) {
-            $oUtils->toFileCache($sCacheIdent, $sText, $iCacheTtl);
+            $oUtils->toFileCache($sCacheIdent, [
+                'content' => $sText,
+                'title' => $this->_sPageTitle,
+                'description' => $this->_sPageDescription,
+                'keywords' => $this->_sPageKeywords,
+            ], $iCacheTtl);
         }
 
         return $sText;
@@ -368,7 +380,21 @@ class ToxidCurl
                         }
                     }
 
-                    $sContent = str_replace($match[0], str_replace($currentSource, $target, $match[0]), $sContent);
+                    $rewritten = str_replace($currentSource, $target, $match[0]);
+
+                    // Ensure trailing slash for href/action URLs (not for src/srcset)
+                    if ($match[1] === 'href' || $match[1] === 'action') {
+                        if (preg_match('#[\'"]([^\'"]+)[\'"]#', $rewritten, $urlMatch)) {
+                            $url = $urlMatch[1];
+                            $pathEnd = strcspn($url, '?#');
+                            $path = substr($url, 0, $pathEnd);
+                            if ($path !== '' && substr($path, -1) !== '/' && !preg_match('#\.\w{2,5}$#', $path)) {
+                                $rewritten = str_replace($url, $path . '/' . substr($url, $pathEnd), $rewritten);
+                            }
+                        }
+                    }
+
+                    $sContent = str_replace($match[0], $rewritten, $sContent);
                 }
             }
         }
